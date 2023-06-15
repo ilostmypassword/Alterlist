@@ -1,0 +1,2 @@
+# alterlist
+Another wordlist generator
