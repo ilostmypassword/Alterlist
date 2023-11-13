@@ -14,11 +14,10 @@ ascii_art = '''     ╔╗  ╔╗        ╔╗        ╔╗
                                 '''
 
 creator = "Created by h3iko (https://medium.com/@h3iko)"
-twitter = "Twitter: @undefined_npc"
 
 print(ascii_art)
 print(creator)
-print(twitter)
+
 print("")
 
 time.sleep(5)
