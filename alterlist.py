@@ -1,8 +1,9 @@
 import itertools
 import datetime
-import random
+import argparse
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 ascii_art = '''     ╔╗  ╔╗        ╔╗        ╔╗ 
      ║║ ╔╝╚╗       ║║       ╔╝╚╗
@@ -14,174 +15,136 @@ ascii_art = '''     ╔╗  ╔╗        ╔╗        ╔╗
                                 '''
 
 creator = "Created by h3iko (https://medium.com/@h3iko)"
-
 print(ascii_art)
 print(creator)
-
 print("")
 
-time.sleep(5)
-
 def read_passwords_from_file(file_path):
-    with open(file_path, "r") as file:
-        passwords = file.read().splitlines()
-    return passwords
+    try:
+        with open(file_path, "r") as file:
+            passwords = file.read().splitlines()
+        return passwords
+    except FileNotFoundError:
+        print(f"Error: The file {file_path} does not exist.")
+        sys.exit(1)
+    except IOError:
+        print(f"Error: Could not read the file {file_path}.")
+        sys.exit(1)
 
-def shuffle_passwords(passwords_list):
-    random.shuffle(passwords_list)
+def leet_variations(password):
+    leet_map = {
+        'a': ['a', '@', '4'],
+        'e': ['e', '3'],
+        'i': ['i', '1'],
+        'o': ['o', '0'],
+        'l': ['l', '1'],
+        't': ['t', '7'],
+        's': ['s', '5']
+    }
+    
+    def replace_chars(chars):
+        if chars:
+            first, rest = chars[0], chars[1:]
+            for replacement in leet_map.get(first, [first]):
+                for combo in replace_chars(rest):
+                    yield replacement + combo
+        else:
+            yield ''
+    
+    return list(replace_chars(password))
 
-def generate_variations(password):
-    variations = []
-    
-    variations.append(password)
-    
-    generic_variations = [password.capitalize(), password.upper(), password.lower()]
-    generic_variations.extend([password + ext for ext in ["123", "2023", "!", "@", "&", "?"]])
-    variations.extend(generic_variations)
+def generate_variations(password, current_year):
+    variations = set()
 
-    l33t_variations = [
-        password.replace("a", "4").replace("e", "3").replace("i", "1").replace("o", "0").replace("a", "@"),
-        password.replace("a", "4").replace("e", "3").replace("i", "1").replace("o", "0"),
-        password.replace("a", "4").replace("e", "3").replace("i", "1"),
-        password.replace("a", "4").replace("e", "3"),
-        password.replace("a", "@").replace("e", "3").replace("i", "1").replace("o", "0"),
-        password.replace("a", "@").replace("e", "3").replace("i", "1"),
-        password.replace("a", "@").replace("e", "3")
-    ]
-    variations.extend(l33t_variations)
-    
-    case_variations = [password.lower(), password.upper(), password.capitalize()]
-    variations.extend(case_variations)
-    
-    current_year = datetime.datetime.now().year
-    date_variations = []
-    for year_offset in range(-10, 11):
-        date_variations.append(password + str(current_year + year_offset))
-        date_variations.append(str(current_year + year_offset) + password)
-    variations.extend(date_variations)
-    
+    cases = set(map(''.join, itertools.product(*([char.lower(), char.upper()] for char in password))))
+
+    leet_variations_set = set()
+    for case in cases:
+        leet_variations_set.update(leet_variations(case))
+
     symbols = ["!", "@", "#", "$", "%", "&"]
-    symbol_variations = [password + symbol for symbol in symbols]
-    symbol_variations.extend([symbol + password for symbol in symbols])
-    variations.extend(symbol_variations)
-    
-    return variations
+    years = [str(current_year + offset) for offset in range(-10, 11)]
+
+    for variation in leet_variations_set:
+        variations.add(variation)
+
+        for symbol in symbols:
+            variations.add(variation + symbol)
+
+        for symbol1, symbol2 in itertools.combinations(symbols, 2):
+            variations.add(variation + symbol1 + symbol2)
+
+        for suffix in itertools.chain(symbols, years):
+            variations.add(variation + suffix)
+            variations.add(suffix + variation)
+
+        for symbol in symbols:
+            for year in years:
+                variations.add(variation + symbol + year)
+                variations.add(symbol + year + variation)
+                variations.add(year + symbol + variation)
+
+    return list(variations)
 
 def generate_all_variations(passwords_list):
-    all_variations = []
-    for password in passwords_list:
-        variations = generate_variations(password)
-        all_variations.extend(variations)
-    return all_variations
+    all_variations = set()
+    current_year = datetime.datetime.now().year
+    with ThreadPoolExecutor() as executor:
+        futures = [executor.submit(generate_variations, pw, current_year) for pw in passwords_list]
+        for future in as_completed(futures):
+            all_variations.update(future.result())
+    return list(all_variations)
 
-def add_leet_variations(variations):
-    leet_variations = []
-    for variation in variations:
-        for r in range(1, min(len(variation), 4)):
-            for subset in itertools.combinations(range(len(variation)), r):
-                leet_variation = variation
-                for i in subset:
-                    leet_variation = leet_variation[:i] + leet_variation[i].replace("a", "4").replace("e", "3").replace("i", "1").replace("o", "0") + leet_variation[i+1:]
-                leet_variations.append(leet_variation)
-    return leet_variations
-
-def add_layer_to_variations(passwords_list):
-    layered_variations = []
-    for password in passwords_list:
-        variations = generate_variations(password)
-        for variation in variations:
-            if variation not in layered_variations:
-                layered_variations.append(variation)
-                
-    leet_variations = add_leet_variations(layered_variations)
-    layered_variations.extend(leet_variations)
+def print_help_menu():
+    print("""
+    Usage:
+        python3 script.py --input <password_file> --output <output_file>
     
-    return layered_variations
+    Options:
+        --input   : Path to the input file containing passwords (required)
+        --output  : Path to the output file where variations will be stored (required)
+    """)
 
-def translate_leetspeak(variation):
-    leet_to_normal = {
-        "4": "a",
-        "3": "e",
-        "1": "i",
-        "0": "o",
-        "@": "a"
-    }
-    translated_variations = set()
-    translated_variations.add(variation)
-    for leet, normal in leet_to_normal.items():
-        translated_variations.add(variation.replace(leet, normal))
-    return translated_variations
+def main():
+    parser = argparse.ArgumentParser(description='Password variation generator.', add_help=False)
+    parser.add_argument('--input', help='Path to the input file containing passwords', required=True)
+    parser.add_argument('--output', help='Path to the output file where variations will be stored', required=True)
+    args = parser.parse_args()
 
-def generate_smart_variations(passwords_list):
-    smart_variations = []
-    for password in passwords_list:
-        variations = generate_variations(password)
-        smart_variations.extend(variations)
-        
-        for r in range(2, min(len(password), 5)):
-            for subset in itertools.combinations(range(len(password)), r):
-                custom_variation = list(password)
-                for i in subset:
-                    custom_variation[i] = random.choice(["@", "3", "1", "0"])
-                smart_variations.append("".join(custom_variation))
-    
-    return smart_variations
+    if not args.input or not args.output:
+        print("Error: Missing required arguments.")
+        print_help_menu()
+        sys.exit(1)
 
-def check_passwords(passwords_list):
-    checked_passwords = []
-    for password in passwords_list:
-        has_symbols = any(c.isalnum() == False for c in password)
-        if has_symbols:
-            translations = set()
-            for variation in passwords_list:
-                if variation != password:
-                    translations |= translate_leetspeak(variation)
-            checked_passwords.extend(list(translations))
-        checked_passwords.append(password)
-    return checked_passwords
+    passwords = read_passwords_from_file(args.input)
+
+    if not passwords:
+        print("Error: List file is empty.")
+        sys.exit(1)
+
+    print("Let me cook...")
+    all_variations = generate_all_variations(passwords)
+
+    with open(args.output, "w") as file:
+        file.write("\n".join(all_variations))
+
+    count_lines_in_file(args.output)
+
+    print(f"Passwords have been stored in {args.output}")
 
 def count_lines_in_file(file_path):
     try:
         with open(file_path, "r") as file:
             line_count = sum(1 for line in file)
-        print(f"Passwords generated : {line_count}")
+        print(f"Passwords generated: {line_count}")
     except FileNotFoundError:
         print(f"File '{file_path}' doesn't exist.")
     except IOError:
         print(f"Error while reading the file '{file_path}'.")
-        
-def print_help_menu():
-    print("Usage :")
-    print("python3 alterlist.py <password_file>")
-    print("")
 
-if len(sys.argv) != 2:
-    print("Error : No password file.")
-    print_help_menu()
-    sys.exit(1)
-
-print("Let me cook...")
-passwords_file = sys.argv[1]
-
-passwords = read_passwords_from_file(passwords_file)
-
-if not passwords:
-    print("Error : Password file is empty.")
-    sys.exit(1)
-
-shuffle_passwords(passwords)
-
-checked_passwords = check_passwords(passwords)
-
-smart_variations = generate_smart_variations(checked_passwords)
-
-layered_variations = add_layer_to_variations(smart_variations)
-
-output_file = "combined.txt"
-with open(output_file, "w") as file:
-    file.write("\n".join(layered_variations))
-
-    
-count_lines_in_file("combined.txt")
-
-print("Passwords has been stored in", output_file)
+if __name__ == "__main__":
+    if len(sys.argv) == 1:
+        print("Error: No arguments provided.")
+        print_help_menu()
+        sys.exit(1)
+    main()
